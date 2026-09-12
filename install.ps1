@@ -2,6 +2,8 @@
 # irm https://raw.githubusercontent.com/Nitin-kun/pause-unpause/main/install.ps1 | iex
 #
 # Do not use param() — PowerShell ignores it when the script is piped to iex.
+# Current Chrome ignores --load-extension. This installer force-installs a packed
+# CRX through Chrome policy so it appears in the profile you already use.
 
 $ErrorActionPreference = "Stop"
 try {
@@ -21,8 +23,11 @@ if ($env:PAUSE_UNPAUSE_NO_LAUNCH -eq "1") { $NoLaunch = $true }
 $RepoSlug = if ($env:PAUSE_UNPAUSE_REPO) { $env:PAUSE_UNPAUSE_REPO } else { "Nitin-kun/pause-unpause" }
 $Prefix = Join-Path $env:LOCALAPPDATA "pause-unpause"
 $ExtDir = Join-Path $Prefix "extension"
+$CrxPath = Join-Path $Prefix "extension.crx"
+$PemPath = Join-Path $Prefix "extension.pem"
+$UpdateXml = Join-Path $Prefix "update.xml"
 $Launcher = Join-Path $Prefix "pause-unpause.cmd"
-$ShortcutBackup = Join-Path $Prefix "shortcut-backup.json"
+$PolicyValue = "pause-unpause"
 
 function Get-InstallerHome {
   if ($PSScriptRoot) { return $PSScriptRoot }
@@ -49,20 +54,17 @@ function Get-BrowserName([string]$browser) {
   return "chrome"
 }
 
-function Restore-ChromeShortcuts {
-  if (-not (Test-Path -LiteralPath $ShortcutBackup)) { return }
-  try {
-    $items = Get-Content -LiteralPath $ShortcutBackup -Raw | ConvertFrom-Json
-  } catch { return }
-  $shell = New-Object -ComObject WScript.Shell
-  foreach ($item in @($items)) {
-    if (-not $item.path -or -not (Test-Path -LiteralPath $item.path)) { continue }
-    try {
-      $lnk = $shell.CreateShortcut($item.path)
-      $lnk.Arguments = [string]$item.arguments
-      $lnk.Save()
-    } catch {}
+function Get-PolicyRoots([string]$browserName) {
+  if ($browserName -eq "msedge") {
+    return @(
+      "HKCU:\SOFTWARE\Policies\Microsoft\Edge",
+      "HKLM:\SOFTWARE\Policies\Microsoft\Edge"
+    )
   }
+  return @(
+    "HKCU:\SOFTWARE\Policies\Google\Chrome",
+    "HKLM:\SOFTWARE\Policies\Google\Chrome"
+  )
 }
 
 function Stop-BrowserProcess([string]$name) {
@@ -74,95 +76,146 @@ function Stop-BrowserProcess([string]$name) {
   } while ((Get-Process -Name $name -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline)
 }
 
-function Enable-DeveloperMode([string]$browserName) {
-  $pref = if ($browserName -eq "msedge") {
-    Join-Path $env:LOCALAPPDATA "Microsoft\Edge\User Data\Default\Preferences"
-  } else {
-    Join-Path $env:LOCALAPPDATA "Google\Chrome\User Data\Default\Preferences"
-  }
-  if (-not (Test-Path -LiteralPath $pref)) { return }
-  try {
-    $raw = [IO.File]::ReadAllText($pref)
-    $next = $raw
-    if ($next -match '"developer_mode"') {
-      $next = [regex]::Replace($next, '"developer_mode"\s*:\s*false', '"developer_mode": true')
-    } elseif ($next -match '"extensions"\s*:\s*\{') {
-      $next = [regex]::Replace(
-        $next,
-        '"extensions"\s*:\s*\{',
-        '"extensions": {"ui":{"developer_mode":true},',
-        1
-      )
-    }
-    if ($next -eq $raw) { return }
-    $utf8 = New-Object System.Text.UTF8Encoding $false
-    [IO.File]::WriteAllText($pref, $next, $utf8)
-  } catch {}
+function Get-FileUri([string]$path) {
+  ([Uri]$path).AbsoluteUri
 }
 
-function Show-ManualSteps {
-  Write-Host ""
-  Write-Host "Add it in chrome://extensions:"
-  Write-Host "  1. Turn on Developer mode (top right)"
-  Write-Host "  2. Click Load unpacked"
-  Write-Host "  3. Pick this folder:"
-  Write-Host "     $ExtDir"
-  Write-Host "  4. Pin pause-unpause from the puzzle icon"
-}
-
-function Invoke-LoadUnpackedCdp([string]$browser, [string]$extDir) {
-  $port = 9229
-  Start-Process -FilePath $browser -ArgumentList @(
-    "--remote-debugging-port=$port",
-    "--remote-debugging-address=127.0.0.1",
-    "--enable-unsafe-extension-debugging"
-  )
-  $deadline = (Get-Date).AddSeconds(25)
-  $version = $null
-  do {
-    Start-Sleep -Milliseconds 500
-    try {
-      $version = Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/version" -TimeoutSec 1
-    } catch {}
-  } while (-not $version -and (Get-Date) -lt $deadline)
-
-  if (-not $version -or -not $version.webSocketDebuggerUrl) { return $false }
-
-  $ws = $null
+function Get-ExtensionIdFromPublicKey([byte[]]$pub) {
+  $sha = [Security.Cryptography.SHA256]::Create()
   try {
-    $ws = New-Object System.Net.WebSockets.ClientWebSocket
-    $cts = New-Object System.Threading.CancellationTokenSource
-    $cts.CancelAfter(20000)
-    $ws.ConnectAsync([Uri]$version.webSocketDebuggerUrl, $cts.Token).GetAwaiter().GetResult()
-    $payload = @{
-      id     = 1
-      method = "Extensions.loadUnpacked"
-      params = @{ path = $extDir }
-    } | ConvertTo-Json -Compress -Depth 6
-    $bytes = [Text.Encoding]::UTF8.GetBytes($payload)
-    $send = New-Object 'System.ArraySegment[byte]' -ArgumentList @(, $bytes)
-    $ws.SendAsync($send, [Net.WebSockets.WebSocketMessageType]::Text, $true, $cts.Token).GetAwaiter().GetResult()
-    $buf = New-Object byte[] 65536
-    $recv = New-Object 'System.ArraySegment[byte]' -ArgumentList @(, $buf)
-    $got = $ws.ReceiveAsync($recv, $cts.Token).GetAwaiter().GetResult()
-    $text = [Text.Encoding]::UTF8.GetString($buf, 0, $got.Count)
-    return ($text -match '"result"' -and $text -notmatch '"error"')
-  } catch {
-    return $false
+    $hash = $sha.ComputeHash($pub)
   } finally {
-    if ($ws) {
-      try { $ws.Dispose() } catch {}
+    $sha.Dispose()
+  }
+  $map = "abcdefghijklmnop".ToCharArray()
+  $chars = New-Object System.Collections.Generic.List[char]
+  for ($i = 0; $i -lt 16; $i++) {
+    $b = $hash[$i]
+    [void]$chars.Add($map[$b -shr 4])
+    [void]$chars.Add($map[$b -band 0xF])
+  }
+  -join $chars
+}
+
+function Get-SpkiFromBytes([byte[]]$bytes) {
+  for ($i = 0; $i -lt $bytes.Length - 4; $i++) {
+    if ($bytes[$i] -ne 0x30 -or $bytes[$i + 1] -ne 0x82) { continue }
+    $len = ($bytes[$i + 2] * 256) + $bytes[$i + 3]
+    $total = $len + 4
+    if ($total -lt 270 -or $total -gt 400) { continue }
+    if (($i + $total) -gt $bytes.Length) { continue }
+    $slice = New-Object byte[] $total
+    [Array]::Copy($bytes, $i, $slice, 0, $total)
+    return $slice
+  }
+  return $null
+}
+
+function Get-CrxExtensionId([string]$path) {
+  $bytes = [IO.File]::ReadAllBytes($path)
+  if ($bytes.Length -lt 16) { throw "CRX file is too small." }
+  $magic = [Text.Encoding]::ASCII.GetString($bytes, 0, 4)
+  if ($magic -ne "Cr24") { throw "Not a Chrome CRX file." }
+  $version = [BitConverter]::ToUInt32($bytes, 4)
+  if ($version -ge 3) {
+    $headerSize = [BitConverter]::ToInt32($bytes, 8)
+    $header = New-Object byte[] $headerSize
+    [Array]::Copy($bytes, 12, $header, 0, $headerSize)
+    $pub = Get-SpkiFromBytes $header
+  } else {
+    $pubLen = [BitConverter]::ToInt32($bytes, 8)
+    $pub = New-Object byte[] $pubLen
+    [Array]::Copy($bytes, 16, $pub, 0, $pubLen)
+  }
+  if (-not $pub) { throw "Could not read the CRX public key." }
+  Get-ExtensionIdFromPublicKey $pub
+}
+
+function Pack-ExtensionCrx([string]$browser, [string]$extDir, [string]$crxPath, [string]$pemPath) {
+  if (Test-Path -LiteralPath $crxPath) { Remove-Item -LiteralPath $crxPath -Force }
+  $args = @("--pack-extension=$extDir", "--no-message-box")
+  if (Test-Path -LiteralPath $pemPath) {
+    $args += "--pack-extension-key=$pemPath"
+  }
+  $proc = Start-Process -FilePath $browser -ArgumentList $args -PassThru
+  $deadline = (Get-Date).AddSeconds(25)
+  $found = $null
+  do {
+    Start-Sleep -Milliseconds 400
+    foreach ($candidate in @(
+        $crxPath,
+        (Join-Path $extDir "extension.crx"),
+        (Join-Path (Split-Path $extDir -Parent) "extension.crx")
+      )) {
+      if (Test-Path -LiteralPath $candidate) {
+        $found = $candidate
+        break
+      }
+    }
+  } while (-not $found -and -not $proc.HasExited -and (Get-Date) -lt $deadline)
+
+  Start-Sleep -Milliseconds 500
+  if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+
+  $parentCrx = Join-Path (Split-Path $extDir -Parent) "$(Split-Path $extDir -Leaf).crx"
+  $parentPem = Join-Path (Split-Path $extDir -Parent) "$(Split-Path $extDir -Leaf).pem"
+  if (-not $found -and (Test-Path -LiteralPath $parentCrx)) { $found = $parentCrx }
+  if (-not $found) { throw "Chrome did not pack the extension into a CRX." }
+  if ($found -ne $crxPath) { Copy-Item -LiteralPath $found -Destination $crxPath -Force }
+  if ((Test-Path -LiteralPath $parentPem) -and $parentPem -ne $pemPath) {
+    Copy-Item -LiteralPath $parentPem -Destination $pemPath -Force
+  }
+}
+
+function Write-UpdateXml([string]$id, [string]$crxPath, [string]$xmlPath, [string]$version) {
+  $crxUri = Get-FileUri $crxPath
+  @"
+<?xml version="1.0" encoding="UTF-8"?>
+<gupdate xmlns="http://www.google.com/update2/response" protocol="2.0">
+  <app appid="$id">
+    <updatecheck codebase="$crxUri" version="$version" status="ok" />
+  </app>
+</gupdate>
+"@ | Set-Content -LiteralPath $xmlPath -Encoding UTF8
+}
+
+function Set-ForceInstallPolicy([string]$browserName, [string]$id, [string]$updateUrl) {
+  $ok = $false
+  foreach ($root in (Get-PolicyRoots $browserName)) {
+    try {
+      $listKey = Join-Path $root "ExtensionInstallForcelist"
+      $srcKey = Join-Path $root "ExtensionInstallSources"
+      $allowKey = Join-Path $root "ExtensionInstallAllowlist"
+      New-Item -Path $listKey -Force | Out-Null
+      New-Item -Path $srcKey -Force | Out-Null
+      New-Item -Path $allowKey -Force | Out-Null
+      New-ItemProperty -Path $listKey -Name $PolicyValue -Value "$id;$updateUrl" -PropertyType String -Force | Out-Null
+      New-ItemProperty -Path $srcKey -Name $PolicyValue -Value "file:///*" -PropertyType String -Force | Out-Null
+      New-ItemProperty -Path $allowKey -Name $PolicyValue -Value $id -PropertyType String -Force | Out-Null
+      $ok = $true
+    } catch {}
+  }
+  if (-not $ok) { throw "Could not write Chrome policy. Run PowerShell as Administrator." }
+}
+
+function Remove-ForceInstallPolicy([string]$browserName) {
+  foreach ($root in (Get-PolicyRoots $browserName)) {
+    foreach ($sub in @("ExtensionInstallForcelist", "ExtensionInstallSources", "ExtensionInstallAllowlist")) {
+      $key = Join-Path $root $sub
+      if (Test-Path -LiteralPath $key) {
+        Remove-ItemProperty -Path $key -Name $PolicyValue -ErrorAction SilentlyContinue
+      }
     }
   }
 }
 
 if ($Uninstall) {
   $browser = Find-Browser
-  Restore-ChromeShortcuts
-  if ($browser) { Stop-BrowserProcess (Get-BrowserName $browser) }
+  $browserName = if ($browser) { Get-BrowserName $browser } else { "chrome" }
+  if ($browser) { Stop-BrowserProcess $browserName }
+  Remove-ForceInstallPolicy $browserName
   if (Test-Path -LiteralPath $Prefix) { Remove-Item -LiteralPath $Prefix -Recurse -Force }
-  Write-Host "pause-unpause files were removed."
-  Write-Host "If it still appears in chrome://extensions, click Remove on that card."
+  Write-Host "pause-unpause was removed. Restart Chrome if it is still open."
   return
 }
 
@@ -181,7 +234,12 @@ if (Test-Path -LiteralPath $localManifest) {
   Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri "https://github.com/$RepoSlug/archive/refs/heads/main.zip" -OutFile $zip
   if (Test-Path -LiteralPath $extract) { Remove-Item -LiteralPath $extract -Recurse -Force }
   Expand-Archive -Path $zip -DestinationPath $extract -Force
-  $manifest = Get-ChildItem -Path $extract -Filter manifest.json -Recurse | Select-Object -First 1
+  $manifest = Get-ChildItem -Path $extract -Filter manifest.json -Recurse |
+    Where-Object { $_.Directory.Name -eq "browser-extension" } |
+    Select-Object -First 1
+  if (-not $manifest) {
+    $manifest = Get-ChildItem -Path $extract -Filter manifest.json -Recurse | Select-Object -First 1
+  }
   if (-not $manifest) { throw "Download succeeded, but manifest.json was missing." }
   Copy-Item -Recurse -Force (Join-Path $manifest.DirectoryName "*") $ExtDir
 }
@@ -190,47 +248,46 @@ if (-not (Test-Path -LiteralPath (Join-Path $ExtDir "manifest.json"))) {
   throw "Install failed: manifest.json is missing from $ExtDir"
 }
 
+$version = "1.0.0"
+try {
+  $man = Get-Content -LiteralPath (Join-Path $ExtDir "manifest.json") -Raw | ConvertFrom-Json
+  if ($man.version) { $version = [string]$man.version }
+} catch {}
+
 $browser = Find-Browser
 @"
 @echo off
-start "" "$browser" chrome://extensions
+start "" "$browser"
 "@ | Set-Content -Encoding ASCII $Launcher
 
-Write-Host ""
-Write-Host "Files are ready."
-Write-Host "  Extension: $ExtDir"
-Write-Host ""
-
 if (-not $browser) {
-  Write-Host "Chrome / Edge was not found. Load that folder as an unpacked extension."
+  Write-Host "Installed the files, but Chrome / Edge was not found."
+  Write-Host "  $ExtDir"
   return
 }
 
 $browserName = Get-BrowserName $browser
-Restore-ChromeShortcuts
-
-try { Set-Clipboard -Value $ExtDir } catch {}
-
-if ($NoLaunch) {
-  Show-ManualSteps
-  return
-}
-
-Write-Host "Closing $browserName so pause-unpause can be added to your profile..."
+Write-Host "Closing $browserName and installing pause-unpause into your profile..."
 Stop-BrowserProcess $browserName
-Enable-DeveloperMode $browserName
 
-$loaded = Invoke-LoadUnpackedCdp $browser $ExtDir
+Write-Host "Packing the extension..."
+Pack-ExtensionCrx $browser $ExtDir $CrxPath $PemPath
 Stop-BrowserProcess $browserName
+
+$extId = Get-CrxExtensionId $CrxPath
+Write-UpdateXml $extId $CrxPath $UpdateXml $version
+Set-ForceInstallPolicy $browserName $extId (Get-FileUri $UpdateXml)
+
+Write-Host ""
+Write-Host "pause-unpause is installed."
+Write-Host "  Extension id: $extId"
+Write-Host "  Files:        $Prefix"
+Write-Host ""
+Write-Host "Chrome may show Managed by your organization. That is how a script is allowed to add an extension without Load unpacked."
+Write-Host "Uninstall later with:  irm https://raw.githubusercontent.com/$RepoSlug/main/install.ps1 | iex   after setting `$env:PAUSE_UNPAUSE_UNINSTALL=1"
+
+if ($NoLaunch) { return }
+
 Start-Sleep -Seconds 1
 Start-Process -FilePath $browser -ArgumentList "chrome://extensions"
-
-if ($loaded) {
-  Write-Host "pause-unpause should now be listed on chrome://extensions."
-  Write-Host "If Developer mode is off, turn it on so unpacked extensions stay enabled."
-} else {
-  Write-Host "Chrome blocked a silent install (normal on current Chrome)."
-  Show-ManualSteps
-  Write-Host "The folder path is on your clipboard."
-  try { Invoke-Item -LiteralPath $ExtDir } catch {}
-}
+Write-Host "Opened chrome://extensions. pause-unpause should appear on that page."

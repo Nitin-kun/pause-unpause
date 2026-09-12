@@ -14,16 +14,9 @@ In PowerShell:
 irm https://raw.githubusercontent.com/Nitin-kun/pause-unpause/main/install.ps1 | iex
 ```
 
-That command downloads the extension into `%LOCALAPPDATA%\pause-unpause\extension` and tries to add it to the Chrome profile you already use.
+That command downloads the extension, packs it, and force-installs it into the Chrome profile you already use. Current Chrome ignores `--load-extension`, so the script uses Chrome policy instead. You do not click **Load unpacked**.
 
-Current Chrome ignores `--load-extension`, so if the extension card is missing, finish with **Load unpacked**:
-
-1. Open `chrome://extensions`
-2. Turn on **Developer mode**
-3. Click **Load unpacked**
-4. Pick `C:\Users\YOU\AppData\Local\pause-unpause\extension`
-
-The installer copies that path to the clipboard.
+Chrome may show **Managed by your organization**. That banner is how Windows is allowed to add an extension without a store listing. Uninstall removes the policy.
 
 If you already cloned this repo:
 
