@@ -85,8 +85,8 @@ script_dir() {
 find_extension_src() {
   local dir
   dir="$(script_dir)"
-  if [[ -n "$dir" && -f "$dir/browser-extension/unpause/manifest.json" ]]; then
-    echo "$dir/browser-extension/unpause"
+  if [[ -n "$dir" && -f "$dir/browser-extension/manifest.json" ]]; then
+    echo "$dir/browser-extension"
     return
   fi
   if [[ -n "$dir" && -f "$dir/manifest.json" ]]; then
@@ -103,8 +103,8 @@ download_extension() {
   echo "Downloading pause-unpause from GitHub ($REPO_SLUG)..."
   if command -v git >/dev/null 2>&1; then
     git clone --depth 1 "https://github.com/${REPO_SLUG}.git" "$tmp/repo"
-    if [[ -f "$tmp/repo/browser-extension/unpause/manifest.json" ]]; then
-      cp -a "$tmp/repo/browser-extension/unpause/." "$dest/"
+    if [[ -f "$tmp/repo/browser-extension/manifest.json" ]]; then
+      cp -a "$tmp/repo/browser-extension/." "$dest/"
     elif [[ -f "$tmp/repo/manifest.json" ]]; then
       cp -a "$tmp/repo/." "$dest/"
     else

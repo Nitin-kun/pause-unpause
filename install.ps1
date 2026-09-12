@@ -169,10 +169,10 @@ if ($Uninstall) {
 New-Item -ItemType Directory -Force -Path $ExtDir | Out-Null
 
 $homeDir = Get-InstallerHome
-$localManifest = Join-Path $homeDir "browser-extension\unpause\manifest.json"
+$localManifest = Join-Path $homeDir "browser-extension\manifest.json"
 if (Test-Path -LiteralPath $localManifest) {
   Write-Host "Installing from local files..."
-  Copy-Item -Recurse -Force (Join-Path $homeDir "browser-extension\unpause\*") $ExtDir
+  Copy-Item -Recurse -Force (Join-Path $homeDir "browser-extension\*") $ExtDir
 } else {
   Write-Host "Downloading pause-unpause from GitHub ($RepoSlug)..."
   $zip = Join-Path $env:TEMP "pause-unpause.zip"

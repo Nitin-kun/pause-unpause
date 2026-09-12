@@ -114,13 +114,13 @@ Chrome and Edge pages (`chrome://`, `edge://`, the Web Store) cannot be assigned
 1. Clone this repo
 2. Open `chrome://extensions`
 3. Enable Developer mode
-4. Load unpacked → `browser-extension/unpause`
+4. Load unpacked → `browser-extension`
 
 ## What's in the repo
 
 - MIT license
 - `install.sh` / `install.ps1` at the **repo root** (this is what the `irm` / `curl` one-liners download)
-- Extension sources in `browser-extension/unpause`
+- Extension sources in `browser-extension`
 
 ## Support
 
