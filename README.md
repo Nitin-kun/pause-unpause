@@ -14,14 +14,16 @@ In PowerShell:
 irm https://raw.githubusercontent.com/Nitin-kun/pause-unpause/main/install.ps1 | iex
 ```
 
-That command:
+That command downloads the extension into `%LOCALAPPDATA%\pause-unpause\extension` and tries to add it to the Chrome profile you already use.
 
-1. Downloads the extension into `%LOCALAPPDATA%\pause-unpause\extension`
-2. Turns on Chrome Developer mode when it can
-3. Adds `--load-extension` to your Chrome / Edge shortcuts so it stays loaded
-4. Restarts the browser with pause-unpause already on
+Current Chrome ignores `--load-extension`, so if the extension card is missing, finish with **Load unpacked**:
 
-Chrome will not let a script click **Load unpacked** for you. Closing and relaunching with `--load-extension` is the way a one-liner can put it on the browser you already use.
+1. Open `chrome://extensions`
+2. Turn on **Developer mode**
+3. Click **Load unpacked**
+4. Pick `C:\Users\YOU\AppData\Local\pause-unpause\extension`
+
+The installer copies that path to the clipboard.
 
 If you already cloned this repo:
 

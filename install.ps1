@@ -23,7 +23,6 @@ $Prefix = Join-Path $env:LOCALAPPDATA "pause-unpause"
 $ExtDir = Join-Path $Prefix "extension"
 $Launcher = Join-Path $Prefix "pause-unpause.cmd"
 $ShortcutBackup = Join-Path $Prefix "shortcut-backup.json"
-$LoadArg = "--load-extension=`"$ExtDir`""
 
 function Get-InstallerHome {
   if ($PSScriptRoot) { return $PSScriptRoot }
@@ -67,15 +66,12 @@ function Restore-ChromeShortcuts {
 }
 
 function Stop-BrowserProcess([string]$name) {
-  $procs = Get-Process -Name $name -ErrorAction SilentlyContinue
-  if (-not $procs) { return }
-  Write-Host "Closing $name so pause-unpause can load into your browser..."
-  $procs | Stop-Process -Force -ErrorAction SilentlyContinue
-  $deadline = (Get-Date).AddSeconds(8)
+  $exe = "$name.exe"
+  cmd.exe /c "taskkill /F /IM $exe /T >nul 2>&1"
+  $deadline = (Get-Date).AddSeconds(12)
   do {
     Start-Sleep -Milliseconds 400
-    $procs = Get-Process -Name $name -ErrorAction SilentlyContinue
-  } while ($procs -and (Get-Date) -lt $deadline)
+  } while ((Get-Process -Name $name -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline)
 }
 
 function Enable-DeveloperMode([string]$browserName) {
@@ -87,54 +83,86 @@ function Enable-DeveloperMode([string]$browserName) {
   if (-not (Test-Path -LiteralPath $pref)) { return }
   try {
     $raw = [IO.File]::ReadAllText($pref)
-    $next = [regex]::Replace($raw, '"developer_mode"\s*:\s*false', '"developer_mode": true')
+    $next = $raw
+    if ($next -match '"developer_mode"') {
+      $next = [regex]::Replace($next, '"developer_mode"\s*:\s*false', '"developer_mode": true')
+    } elseif ($next -match '"extensions"\s*:\s*\{') {
+      $next = [regex]::Replace(
+        $next,
+        '"extensions"\s*:\s*\{',
+        '"extensions": {"ui":{"developer_mode":true},',
+        1
+      )
+    }
     if ($next -eq $raw) { return }
     $utf8 = New-Object System.Text.UTF8Encoding $false
     [IO.File]::WriteAllText($pref, $next, $utf8)
   } catch {}
 }
 
-function Update-ChromeShortcuts([string]$browser) {
-  $roots = @(
-    (Join-Path $env:USERPROFILE "Desktop"),
-    (Join-Path $env:PUBLIC "Desktop"),
-    (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"),
-    (Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs"),
-    (Join-Path $env:APPDATA "Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar")
-  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+function Show-ManualSteps {
+  Write-Host ""
+  Write-Host "Add it in chrome://extensions:"
+  Write-Host "  1. Turn on Developer mode (top right)"
+  Write-Host "  2. Click Load unpacked"
+  Write-Host "  3. Pick this folder:"
+  Write-Host "     $ExtDir"
+  Write-Host "  4. Pin pause-unpause from the puzzle icon"
+}
 
-  $shell = New-Object -ComObject WScript.Shell
-  $backup = @()
-  $leaf = [IO.Path]::GetFileName($browser)
+function Invoke-LoadUnpackedCdp([string]$browser, [string]$extDir) {
+  $port = 9229
+  Start-Process -FilePath $browser -ArgumentList @(
+    "--remote-debugging-port=$port",
+    "--remote-debugging-address=127.0.0.1",
+    "--enable-unsafe-extension-debugging"
+  )
+  $deadline = (Get-Date).AddSeconds(25)
+  $version = $null
+  do {
+    Start-Sleep -Milliseconds 500
+    try {
+      $version = Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/version" -TimeoutSec 1
+    } catch {}
+  } while (-not $version -and (Get-Date) -lt $deadline)
 
-  foreach ($root in $roots) {
-    Get-ChildItem -LiteralPath $root -Filter *.lnk -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
-      try {
-        $lnk = $shell.CreateShortcut($_.FullName)
-      } catch { return }
-      if (-not $lnk.TargetPath) { return }
-      if ([IO.Path]::GetFileName($lnk.TargetPath) -ne $leaf) { return }
-      $orig = [string]$lnk.Arguments
-      if ($orig -like "*$ExtDir*") { return }
-      $backup += [pscustomobject]@{ path = $_.FullName; arguments = $orig }
-      $lnk.Arguments = ($orig.Trim() + " " + $LoadArg).Trim()
-      try { $lnk.Save() } catch {}
+  if (-not $version -or -not $version.webSocketDebuggerUrl) { return $false }
+
+  $ws = $null
+  try {
+    $ws = New-Object System.Net.WebSockets.ClientWebSocket
+    $cts = New-Object System.Threading.CancellationTokenSource
+    $cts.CancelAfter(20000)
+    $ws.ConnectAsync([Uri]$version.webSocketDebuggerUrl, $cts.Token).GetAwaiter().GetResult()
+    $payload = @{
+      id     = 1
+      method = "Extensions.loadUnpacked"
+      params = @{ path = $extDir }
+    } | ConvertTo-Json -Compress -Depth 6
+    $bytes = [Text.Encoding]::UTF8.GetBytes($payload)
+    $send = New-Object 'System.ArraySegment[byte]' -ArgumentList @(, $bytes)
+    $ws.SendAsync($send, [Net.WebSockets.WebSocketMessageType]::Text, $true, $cts.Token).GetAwaiter().GetResult()
+    $buf = New-Object byte[] 65536
+    $recv = New-Object 'System.ArraySegment[byte]' -ArgumentList @(, $buf)
+    $got = $ws.ReceiveAsync($recv, $cts.Token).GetAwaiter().GetResult()
+    $text = [Text.Encoding]::UTF8.GetString($buf, 0, $got.Count)
+    return ($text -match '"result"' -and $text -notmatch '"error"')
+  } catch {
+    return $false
+  } finally {
+    if ($ws) {
+      try { $ws.Dispose() } catch {}
     }
-  }
-
-  if ($backup.Count -gt 0) {
-    $backup | ConvertTo-Json | Set-Content -LiteralPath $ShortcutBackup -Encoding UTF8
   }
 }
 
 if ($Uninstall) {
   $browser = Find-Browser
   Restore-ChromeShortcuts
+  if ($browser) { Stop-BrowserProcess (Get-BrowserName $browser) }
   if (Test-Path -LiteralPath $Prefix) { Remove-Item -LiteralPath $Prefix -Recurse -Force }
-  Write-Host "pause-unpause removed. Chrome shortcuts were restored."
-  if ($browser) {
-    Write-Host "Restart Chrome if it is open so the unpacked extension unloads."
-  }
+  Write-Host "pause-unpause files were removed."
+  Write-Host "If it still appears in chrome://extensions, click Remove on that card."
   return
 }
 
@@ -163,36 +191,46 @@ if (-not (Test-Path -LiteralPath (Join-Path $ExtDir "manifest.json"))) {
 }
 
 $browser = Find-Browser
+@"
+@echo off
+start "" "$browser" chrome://extensions
+"@ | Set-Content -Encoding ASCII $Launcher
+
+Write-Host ""
+Write-Host "Files are ready."
+Write-Host "  Extension: $ExtDir"
+Write-Host ""
+
 if (-not $browser) {
-  Write-Host "Installed the files, but Chrome / Edge was not found."
-  Write-Host "Load this folder in chrome://extensions as an unpacked extension:"
-  Write-Host "  $ExtDir"
+  Write-Host "Chrome / Edge was not found. Load that folder as an unpacked extension."
   return
 }
 
 $browserName = Get-BrowserName $browser
+Restore-ChromeShortcuts
 
-@"
-@echo off
-start "" "$browser" $LoadArg
-"@ | Set-Content -Encoding ASCII $Launcher
-
-Update-ChromeShortcuts $browser
-
-Write-Host ""
-Write-Host "pause-unpause is installed."
-Write-Host "  Extension: $ExtDir"
-Write-Host "  Command:   $Launcher"
-Write-Host ""
+try { Set-Clipboard -Value $ExtDir } catch {}
 
 if ($NoLaunch) {
-  Write-Host "Run $Launcher (or restart Chrome from the Start menu) to load it."
+  Show-ManualSteps
   return
 }
 
+Write-Host "Closing $browserName so pause-unpause can be added to your profile..."
 Stop-BrowserProcess $browserName
 Enable-DeveloperMode $browserName
 
-Write-Host "Opening your browser with pause-unpause loaded..."
-Start-Process -FilePath $browser -ArgumentList "--load-extension=$ExtDir"
-Write-Host "Done. Pin the pause-unpause icon from the puzzle menu if you want it on the toolbar."
+$loaded = Invoke-LoadUnpackedCdp $browser $ExtDir
+Stop-BrowserProcess $browserName
+Start-Sleep -Seconds 1
+Start-Process -FilePath $browser -ArgumentList "chrome://extensions"
+
+if ($loaded) {
+  Write-Host "pause-unpause should now be listed on chrome://extensions."
+  Write-Host "If Developer mode is off, turn it on so unpacked extensions stay enabled."
+} else {
+  Write-Host "Chrome blocked a silent install (normal on current Chrome)."
+  Show-ManualSteps
+  Write-Host "The folder path is on your clipboard."
+  try { Invoke-Item -LiteralPath $ExtDir } catch {}
+}
