@@ -1,0 +1,247 @@
+:root {
+  color-scheme: dark;
+  --bg-0: #050506;
+  --bg-1: #0c0c0e;
+  --glass: rgba(255, 255, 255, 0.045);
+  --glass-strong: rgba(255, 255, 255, 0.08);
+  --ink: #f5f5f7;
+  --muted: rgba(255, 255, 255, 0.52);
+  --line: rgba(255, 255, 255, 0.12);
+  --line-strong: rgba(255, 255, 255, 0.22);
+  --shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  --learn: #ffffff;
+  --beat: #cfcfd4;
+  --danger: #ff8a80;
+  --radius: 16px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: 340px;
+  background: var(--bg-0);
+  color: var(--ink);
+  font: 13.5px/1.45 "SF Pro Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(120px 90px at 12% -10%, rgba(255, 255, 255, 0.14), transparent 70%),
+    radial-gradient(160px 120px at 110% 8%, rgba(255, 255, 255, 0.07), transparent 68%),
+    linear-gradient(180deg, var(--bg-1), var(--bg-0));
+}
+
+body::before,
+body::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  border-radius: 50%;
+  filter: blur(28px);
+}
+
+body::before {
+  width: 140px;
+  height: 140px;
+  top: -48px;
+  left: -36px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+body::after {
+  width: 180px;
+  height: 180px;
+  right: -70px;
+  bottom: -80px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.sheet {
+  position: relative;
+  z-index: 1;
+  padding: 18px 16px 16px;
+}
+
+header {
+  margin-bottom: 16px;
+}
+
+.kicker {
+  margin: 0 0 6px;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 620;
+  letter-spacing: -0.045em;
+}
+
+.lede {
+  margin: 7px 0 0;
+  color: var(--muted);
+}
+
+.card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--glass);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border-radius: var(--radius);
+  padding: 13px 12px 12px;
+  margin-bottom: 10px;
+  box-shadow: var(--shadow);
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+}
+
+.card.is-set {
+  border-color: var(--line-strong);
+  background: var(--glass-strong);
+}
+
+.card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mark {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mark-learn,
+.mark-beat {
+  color: var(--ink);
+}
+
+.tab-title {
+  margin: 8px 0 11px;
+  min-height: 2.7em;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.tab-title.is-empty {
+  color: var(--muted);
+}
+
+.assign,
+.text-btn {
+  font: inherit;
+  cursor: pointer;
+}
+
+.assign {
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #111114;
+  padding: 8px 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+
+.assign:hover {
+  background: #fff;
+  transform: translateY(-1px);
+}
+
+.assign:active {
+  transform: translateY(0);
+}
+
+.text-btn {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  padding: 0;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.text-btn:hover {
+  color: var(--danger);
+}
+
+.sync {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 10px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.sync input {
+  appearance: none;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.08);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.sync input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  transition: transform 0.16s ease;
+}
+
+.sync input:checked {
+  background: #fff;
+  border-color: #fff;
+}
+
+.sync input:checked::after {
+  background: #111114;
+  transform: translateX(14px);
+}
+
+.status {
+  margin: 0 0 8px;
+  color: var(--danger);
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}

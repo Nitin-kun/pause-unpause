@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pause-unpause</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="sheet">
+      <header>
+        <p class="kicker">Study session</p>
+        <h1>pause-unpause</h1>
+        <p class="lede">Lecture plays, beat waits. Lecture pauses, beat fills the gap.</p>
+      </header>
+
+      <section class="card" data-role="learning">
+        <div class="card-top">
+          <span class="mark mark-learn">Lecture</span>
+          <button type="button" class="text-btn" data-clear="learning" hidden>Clear</button>
+        </div>
+        <p class="tab-title" data-title="learning">No tab assigned</p>
+        <button type="button" class="assign" data-assign="learning">Use this tab</button>
+      </section>
+
+      <section class="card" data-role="beat">
+        <div class="card-top">
+          <span class="mark mark-beat">Type beat</span>
+          <button type="button" class="text-btn" data-clear="beat" hidden>Clear</button>
+        </div>
+        <p class="tab-title" data-title="beat">No tab assigned</p>
+        <button type="button" class="assign" data-assign="beat">Use this tab</button>
+      </section>
+
+      <label class="sync">
+        <input type="checkbox" id="sync" checked />
+        <span>Keep them in sync</span>
+      </label>
+
+      <p class="status" id="status" hidden></p>
+      <p class="hint" id="hint">
+        Start the type beat once yourself. After that, pause-unpause can pause and resume it.
+      </p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
